@@ -54,7 +54,7 @@ jobs:
       - name: Test Image Build
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./product-service
           push: false
           tags: ${{ secrets.ACR_LOGIN_SERVER }}/product-service:test
           platforms: linux/amd64
