@@ -28,6 +28,9 @@ product-service:
 
 # Add actuator endpoints for health checks
 management:
+  zipkin:
+    tracing:
+      endpoint: http://localhost:9411/api/v2/spans
   endpoints:
     web:
       exposure:
