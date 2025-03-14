@@ -73,14 +73,14 @@ jobs:
           resource-group: ${{ env.AKS_RESOURCE_GROUP }}
           cluster-name: ${{ env.AKS_CLUSTER_NAME }}
 
-      - name: Prepare namespace with Helm ownership
+      - name: Create namespace
         run: |
-          # Create namespace with Helm annotations if it doesn't exist
-          # Or update existing namespace with proper Helm ownership
-          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | \
-          kubectl label --dry-run=client -o yaml -f - app.kubernetes.io/managed-by=Helm | \
-          kubectl annotate --dry-run=client -o yaml -f - meta.helm.sh/release-name=fex-services meta.helm.sh/release-namespace=${{ env.NAMESPACE }} | \
-          kubectl apply -f -
+          # Simply create the namespace without trying to apply labels/annotations in the same step
+          kubectl create namespace ${{ env.NAMESPACE }}
+          
+          # Now add the Helm ownership labels and annotations to the namespace
+          kubectl label namespace ${{ env.NAMESPACE }} app.kubernetes.io/managed-by=Helm --overwrite
+          kubectl annotate namespace ${{ env.NAMESPACE }} meta.helm.sh/release-name=fex-services meta.helm.sh/release-namespace=${{ env.NAMESPACE }} --overwrite
 
       - name: Update Helm dependencies
         run: |
