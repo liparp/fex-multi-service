@@ -21,16 +21,22 @@ spring:
       enabled: true
       path: /h2-console
 
-# Product service URL (updated for Kubernetes service discovery)
+# Add logging configuration
+logging:
+  level:
+    root: INFO
+    app: DEBUG
+    org.springframework.web: DEBUG
+    org.hibernate: INFO
+
+# Product service URL
 product-service:
   #url: http://product-service/api/products
-   url: http://localhost:8081/api/products
+  #url: http://localhost:8081/api/products
+  url: http://74.248.178.191:80/api/products
 
 # Add actuator endpoints for health checks
 management:
-  zipkin:
-    tracing:
-      endpoint: http://localhost:9411/api/v2/spans
   endpoints:
     web:
       exposure:
@@ -38,3 +44,6 @@ management:
   endpoint:
     health:
       show-details: always
+  # If you don't need tracing, disable it
+  tracing:
+    enabled: false

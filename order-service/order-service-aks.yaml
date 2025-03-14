@@ -1,0 +1,150 @@
+---
+# ConfigMap for order service application properties
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-service-config
+  namespace: fex-multiple-services
+data:
+  application.yml: |
+    server:
+      port: 8080
+      servlet:
+        context-path: /api
+
+    spring:
+      application:
+        name: order-service
+      datasource:
+        url: jdbc:h2:mem:orderdb
+        driver-class-name: org.h2.Driver
+        username: sa
+        password:
+      jpa:
+        database-platform: org.hibernate.dialect.H2Dialect
+        hibernate:
+          ddl-auto: update
+        show-sql: true
+      h2:
+        console:
+          enabled: true
+          path: /h2-console
+
+    # Add logging configuration
+    logging:
+      level:
+        root: INFO
+        app: DEBUG
+        org.springframework.web: DEBUG
+        org.hibernate: INFO
+
+    # Product service URL - using Kubernetes service discovery
+    product-service:
+      url: http://product-service/api/products
+
+    # Add actuator endpoints for health checks
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health,info,metrics
+      endpoint:
+        health:
+          show-details: always
+      tracing:
+        enabled: false
+---
+# Service definition for order-service
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: fex-multiple-services
+  labels:
+    app: order-service
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: order-service
+---
+# Deployment for order-service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: fex-multiple-services
+  labels:
+    app: order-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+        - name: order-service
+          image: paveldockertest.azurecr.io/order-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config
+          env:
+            - name: SPRING_CONFIG_LOCATION
+              value: file:/app/config/application.yml
+          resources:
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /api/actuator/health
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+      volumes:
+        - name: config-volume
+          configMap:
+            name: order-service-config
+
+# Ingress for order-service
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: order-service-ingress
+  namespace: fex-multiple-services
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /order(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: order-service
+                port:
+                  number: 80

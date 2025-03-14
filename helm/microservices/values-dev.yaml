@@ -1,0 +1,15 @@
+# helm/microservices/values-dev.yaml
+global:
+  environment: dev
+
+product-service:
+  resources:
+    limits:
+      cpu: 300m
+      memory: 512Mi
+
+order-service:
+  resources:
+    limits:
+      cpu: 300m
+      memory: 512Mi

@@ -1,0 +1,14 @@
+# helm/microservices/Chart.yaml
+apiVersion: v2
+name: microservices
+description: Helm chart for your microservices application
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+dependencies:
+  - name: product-service
+    version: 0.1.0
+    repository: file://../product-service
+  - name: order-service
+    version: 0.1.0
+    repository: file://../order-service

@@ -1,0 +1,133 @@
+name: Deploy to AKS with Helm
+
+on:
+  # Run after the image build workflows are complete
+  workflow_run:
+    workflows:
+      - "Build and Push to Azure Container Registry"
+    types:
+      - completed
+    branches: ["main"]
+  
+  # Allow manual triggers
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+env:
+  NAMESPACE: fex-multiple-services
+  AKS_RESOURCE_GROUP: MyAKSClusterResourceGroup # Update with your resource group
+  AKS_CLUSTER_NAME: MyAKSClusterFex     # Update with your cluster name
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Only run if the build workflow was successful or this is a manual trigger
+    #if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Determine environment
+        id: determine_env
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          else
+            # For automated runs after image builds, use main branch for prod environment
+            if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+              ENVIRONMENT="prod"
+            else
+              ENVIRONMENT="dev"
+            fi
+          fi
+          echo "ENVIRONMENT=${ENVIRONMENT}" >> $GITHUB_OUTPUT
+          echo "Using environment: ${ENVIRONMENT}"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ env.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ env.AKS_CLUSTER_NAME }}
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Update Helm dependencies
+        run: |
+          cd helm
+          helm dependency update microservices
+
+      - name: Lint Helm chart
+        run: |
+          cd helm
+          helm lint microservices
+
+      - name: Deploy with Helm
+        run: |
+          cd helm
+          
+          # Get latest image tags from ACR
+          PRODUCT_IMAGE_TAG=$(az acr repository show-tags \
+            --name ${{ secrets.ACR_LOGIN_SERVER }} \
+            --repository product-service \
+            --orderby time_desc \
+            --query "[0]" -o tsv)
+          
+          ORDER_IMAGE_TAG=$(az acr repository show-tags \
+            --name ${{ secrets.ACR_LOGIN_SERVER }} \
+            --repository order-service \
+            --orderby time_desc \
+            --query "[0]" -o tsv)
+          
+          echo "Using product-service:${PRODUCT_IMAGE_TAG} and order-service:${ORDER_IMAGE_TAG}"
+          
+          # Deploy using Helm
+          helm upgrade --install fex-services microservices \
+            --namespace ${{ env.NAMESPACE }} \
+            --values microservices/values.yaml \
+            --values microservices/values-${{ steps.determine_env.outputs.ENVIRONMENT }}.yaml \
+            --set global.registry=${{ secrets.ACR_LOGIN_SERVER }} \
+            --set global.imageTag=${PRODUCT_IMAGE_TAG} \
+            --set 'product-service.image.tag'=${PRODUCT_IMAGE_TAG} \
+            --set 'order-service.image.tag'=${ORDER_IMAGE_TAG} \
+            --set global.deploymentTimestamp="$(date)" \
+            --wait --timeout 5m
+
+      - name: Verify deployment
+        run: |
+          echo "Checking deployment status..."
+          kubectl rollout status deployment/product-service -n ${{ env.NAMESPACE }}
+          kubectl rollout status deployment/order-service -n ${{ env.NAMESPACE }}
+          
+          echo "Services deployed:"
+          kubectl get services -n ${{ env.NAMESPACE }}
+          
+          echo "Ingress deployed:"
+          kubectl get ingress -n ${{ env.NAMESPACE }}
+          
+          echo "Deployment completed successfully!"
