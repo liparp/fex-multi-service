@@ -23,14 +23,14 @@ on:
 
 env:
   NAMESPACE: fex-multiple-services
-  AKS_RESOURCE_GROUP: MyAKSClusterResourceGroup # Update with your resource group
-  AKS_CLUSTER_NAME: MyAKSClusterFex     # Update with your cluster name
+  AKS_RESOURCE_GROUP: MyAKSClusterResourceGroup
+  AKS_CLUSTER_NAME: MyAKSClusterFex
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     # Only run if the build workflow was successful or this is a manual trigger
-    #if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - name: Checkout code
@@ -73,9 +73,14 @@ jobs:
           resource-group: ${{ env.AKS_RESOURCE_GROUP }}
           cluster-name: ${{ env.AKS_CLUSTER_NAME }}
 
-      - name: Create namespace if not exists
+      - name: Prepare namespace with Helm ownership
         run: |
-          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | kubectl apply -f -
+          # Create namespace with Helm annotations if it doesn't exist
+          # Or update existing namespace with proper Helm ownership
+          kubectl create namespace ${{ env.NAMESPACE }} --dry-run=client -o yaml | \
+          kubectl label --dry-run=client -o yaml -f - app.kubernetes.io/managed-by=Helm | \
+          kubectl annotate --dry-run=client -o yaml -f - meta.helm.sh/release-name=fex-services meta.helm.sh/release-namespace=${{ env.NAMESPACE }} | \
+          kubectl apply -f -
 
       - name: Update Helm dependencies
         run: |
@@ -87,10 +92,9 @@ jobs:
           cd helm
           helm lint microservices
 
-      - name: Deploy with Helm
+      - name: Get ACR image tags
+        id: get_tags
         run: |
-          cd helm
-          
           # Get latest image tags from ACR
           PRODUCT_IMAGE_TAG=$(az acr repository show-tags \
             --name ${{ secrets.ACR_LOGIN_SERVER }} \
@@ -106,28 +110,40 @@ jobs:
           
           echo "Using product-service:${PRODUCT_IMAGE_TAG} and order-service:${ORDER_IMAGE_TAG}"
           
+          # Export tags for next steps
+          echo "PRODUCT_IMAGE_TAG=${PRODUCT_IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "ORDER_IMAGE_TAG=${ORDER_IMAGE_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Deploy with Helm
+        run: |
+          cd helm
+          
           # Deploy using Helm
           helm upgrade --install fex-services microservices \
             --namespace ${{ env.NAMESPACE }} \
             --values microservices/values.yaml \
             --values microservices/values-${{ steps.determine_env.outputs.ENVIRONMENT }}.yaml \
             --set global.registry=${{ secrets.ACR_LOGIN_SERVER }} \
-            --set global.imageTag=${PRODUCT_IMAGE_TAG} \
-            --set 'product-service.image.tag'=${PRODUCT_IMAGE_TAG} \
-            --set 'order-service.image.tag'=${ORDER_IMAGE_TAG} \
+            --set global.imageTag=${{ steps.get_tags.outputs.PRODUCT_IMAGE_TAG }} \
+            --set 'product-service.image.tag'=${{ steps.get_tags.outputs.PRODUCT_IMAGE_TAG }} \
+            --set 'order-service.image.tag'=${{ steps.get_tags.outputs.ORDER_IMAGE_TAG }} \
             --set global.deploymentTimestamp="$(date)" \
-            --wait --timeout 5m
+            --wait --timeout 5m \
+            --no-hooks
 
       - name: Verify deployment
         run: |
           echo "Checking deployment status..."
-          kubectl rollout status deployment/product-service -n ${{ env.NAMESPACE }}
-          kubectl rollout status deployment/order-service -n ${{ env.NAMESPACE }}
+          kubectl rollout status deployment/product-service -n ${{ env.NAMESPACE }} --timeout=120s
+          kubectl rollout status deployment/order-service -n ${{ env.NAMESPACE }} --timeout=120s
           
           echo "Services deployed:"
           kubectl get services -n ${{ env.NAMESPACE }}
           
           echo "Ingress deployed:"
           kubectl get ingress -n ${{ env.NAMESPACE }}
+          
+          echo "Pods status:"
+          kubectl get pods -n ${{ env.NAMESPACE }}
           
           echo "Deployment completed successfully!"
