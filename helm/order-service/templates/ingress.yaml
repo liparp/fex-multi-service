@@ -1,23 +1,22 @@
 # helm/order-service/templates/ingress.yaml
-{{- if .Values.ingress.enabled -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ .Chart.Name }}-ingress
-  namespace: {{ .Values.global.namespace | default .Values.namespace }}
+  name: order-service-ingress
+  namespace: fex-multiple-services
   annotations:
-    {{- range $key, $value := .Values.ingress.annotations }}
-    {{ $key }}: {{ $value | quote }}
-    {{- end }}
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/rewrite-target: "/$2"
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
 spec:
   rules:
     - http:
         paths:
-          - path: {{ .Values.ingress.path }}
+          - path: /order(/|$)(.*)
             pathType: Prefix
             backend:
               service:
-                name: {{ .Chart.Name }}
+                name: order-service
                 port:
-                  number: {{ .Values.service.port }}
-{{- end }}
+                  number: 80
