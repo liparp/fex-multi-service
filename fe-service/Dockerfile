@@ -16,7 +16,7 @@ RUN npm run build
 FROM nginx:alpine as production
 WORKDIR /usr/share/nginx/html
 RUN rm -rf ./*
-COPY --from=build /app/build .
+COPY --from=build /app/dist .
 
 # Optional: Copy custom nginx config if needed
 # COPY nginx.conf /etc/nginx/conf.d/default.conf
