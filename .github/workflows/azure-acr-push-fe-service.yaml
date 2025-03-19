@@ -32,7 +32,7 @@ jobs:
       - name: Test Image Build
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./fe-service
           push: false
           tags: ${{ secrets.ACR_LOGIN_SERVER }}/react-app:test
           platforms: linux/amd64
@@ -44,7 +44,7 @@ jobs:
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./fe-service
           push: true
           platforms: linux/amd64
           tags: |
