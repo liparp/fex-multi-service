@@ -17,12 +17,23 @@ jobs:
 
       # Set up Docker Buildx with container driver to properly support caching
       - name: Set up Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v3
         with:
+          # Use the docker-container driver explicitly
           driver: docker-container
-          driver-opts: |
-            image=moby/buildkit:buildx-stable-1
-            network=host
+          # Use a specific buildx version
+          buildkitd-flags: --debug
+          # Make sure all context needed for caching is available
+          endpoint: unix:///var/run/docker.sock
+
+      # Verify the builder is using the correct driver
+      - name: Verify Buildx Setup
+        run: |
+          echo "Builder info:"
+          docker buildx inspect
+          echo "Builder drivers:"
+          docker info | grep -i driver
 
       - name: Login to Azure Container Registry
         uses: azure/docker-login@v1
@@ -31,19 +42,7 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      # Build without push first to test if the image builds correctly
-      - name: Test Image Build
-        uses: docker/build-push-action@v5
-        with:
-          context: ./fe-service
-          push: false
-          tags: ${{ secrets.ACR_LOGIN_SERVER }}/react-app:test
-          platforms: linux/amd64
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Then build with all options and push
+      # Then build with all options and push directly
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
@@ -53,8 +52,9 @@ jobs:
           tags: |
             ${{ secrets.ACR_LOGIN_SERVER }}/react-app:latest
             ${{ secrets.ACR_LOGIN_SERVER }}/react-app:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Use registry caching instead of GHA caching
+          cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/react-app:latest
+          cache-to: type=inline
 
       - name: Smoke Test - Verify Image
         run: |
